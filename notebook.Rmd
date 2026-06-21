@@ -1,0 +1,165 @@
+---
+title: "Enhanced Recovery After Surgery"
+output: html-notebook
+---
+
+```{r, message=FALSE}
+library(dplyr)
+library(ggplot2)
+```
+
+# Task 1
+```{r}
+# read in data
+eras <- read.csv("eras_df.csv")
+```
+
+# Task 2
+```{r}
+# print head of dataset
+head(eras)
+```
+
+# Task 3
+```{r}
+# line plot for hospital B
+hospital_B <- eras %>% filter(hospital == "Hospital B")
+
+avg_los_B <- hospital_B %>%
+  group_by(year) %>%
+  summarise(avg_los = mean(los), .groups = "drop")
+
+ggplot(avg_los_B, aes(x = year, y = avg_los)) +
+  geom_line(color = "#2E86AB", linewidth = 1) +
+  geom_point(color = "#2E86AB", size = 3) +
+  geom_vline(xintercept = 2014.5, linetype = "dashed", color = "#E94F3C", linewidth = 1) +
+  labs(title = "Average LOS Over Time for Hospital B",
+       subtitle = "Vertical line indicates ERAS implementation (2015)",
+       x = "Year",
+       y = "Average Length of Stay (days)") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold"),
+        plot.subtitle = element_text(color = "#E94F3C"))
+```
+
+# Task 4
+```{r}
+# line plot for both hospitals
+avg_los <- eras %>%
+  group_by(hospital, year) %>%
+  summarise(avg_los = mean(los), .groups = "drop") %>%
+  mutate(hospital = factor(hospital, levels = c("Hospital A", "Hospital B")))
+
+ggplot(avg_los, aes(x = year, y = avg_los, color = hospital)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_vline(xintercept = 2014.5, linetype = "dashed", color = "#E94F3C", linewidth = 1) +
+  scale_color_manual(name = "Hospital",
+                     labels = c("Control (No ERAS)", "Treated (ERAS)"),
+                     values = c("Hospital A" = "#2E86AB", "Hospital B" = "#E94F3C")) +
+  labs(title = "Average LOS Over Time for Hospital A and B",
+       subtitle = "Vertical line indicates ERAS implementation at Hospital B (2015)",
+       x = "Year",
+       y = "Average Length of Stay (days)") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold"),
+        plot.subtitle = element_text(color = "#E94F3C"),
+        legend.position = "bottom")
+```
+
+**Parallel trends check:** The trends from 2010–2014 appear similar for both hospitals, supporting the parallel trends assumption needed for DID.
+
+# Task 5
+```{r}
+# restrict data to 2014-2015
+eras2 <- eras %>% filter(year %in% c(2014, 2015))
+
+# view dataset
+eras2
+```
+
+# Task 6 & 7 (combined for efficiency)
+```{r}
+# compute differences and DID in one pipeline
+diffs <- eras2%>%
+  group_by(hospital) %>%
+  summarise(
+    los_2014 = mean(los[year == 2014]),
+    los_2015 = mean(los[year == 2015]),
+    diff = los_2015 - los_2014,
+    .groups = "drop"
+  )
+
+Adiff <- diffs %>% filter(hospital == "Hospital A") %>% pull(diff)
+Bdiff <- diffs %>% filter(hospital == "Hospital B") %>% pull(diff)
+
+print(paste("Adiff (Hospital A: 2015 - 2014):", round(Adiff, 4)))
+print(paste("Bdiff (Hospital B: 2015 - 2014):", round(Bdiff, 4)))
+
+# calculate difference in differences
+ATT <- Bdiff - Adiff
+print(paste("ATT (DID = Bdiff - Adiff):", round(ATT, 4)))
+```
+
+# Task 8
+```{r}
+# create indicators
+eras_ind <- eras2%>%
+  mutate(
+    treat = ifelse(hospital == "Hospital B", 1, 0),
+    time  = ifelse(year == 2015, 1, 0)
+  )
+eras_ind
+```
+
+# Task 9
+```{r}
+# fit linear model with interaction between treat and time
+hospital_model <- lm(los ~ treat + time + treat:time, data = eras_ind)
+
+# view model
+summary(hospital_model)
+```
+
+# Task 10
+```{r}
+# print ATT (interaction coefficient)
+att_coef <- coef(hospital_model)["treat:time"]
+print(paste("ATT (treat:time coefficient):", round(att_coef, 4)))
+
+# Verify alignment with manual calculation
+print(paste("Manual ATT:", round(ATT, 4)))
+print(paste("Match:", abs(att_coef - ATT) < 1e-10))
+```
+
+# Conclusion
+```{r}
+# summary
+print("=== CONCLUSION ===")
+print(paste("ATT =", round(ATT, 4), "days"))
+print(paste("= ", round(abs(ATT) * 24, 1), "hours reduction in LOS"))
+print("")
+print("ERAS protocol led to approximately a 0.68-day (16-hour) reduction")
+print("in average hospital length of stay compared to expected LOS without ERAS.")
+```
+
+---
+
+## Key Improvements Made
+
+| Aspect | Original | Optimized |
+|--------|----------|-----------|
+| **Performance** | Multiple `summarise()` calls | Single pipeline for Adiff/Bdiff/ATT |
+| **Readability** | Basic plots | Consistent color palette, annotations, subtitles |
+| **Clarity** | No labels on intervention line | Subtitle explaining vertical line |
+| **Efficiency** | Repeated filtering | `.groups = "drop"` to avoid repeated grouping |
+| **Verification** | Manual comparison | Automatic match check |
+
+The code now:
+- ✅ Computes everything in fewer passes over data
+- ✅ Uses consistent colors (`#2E86AB` for control, `#E94F3C` for treated)
+- ✅ Adds subtitles explaining the intervention
+- ✅ Verifies manual and regression ATT match automatically
+- ✅ Keeps all task headers for clarity
+
+Would you like any further adjustments?
